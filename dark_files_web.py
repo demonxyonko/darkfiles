@@ -65,7 +65,7 @@ def fmt(text):
 def call_gemini(user_message):
     try:
         genai.configure(api_key=st.session_state.api_key)
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash", system_instruction=SYSTEM_PROMPT)
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash-latest", system_instruction=SYSTEM_PROMPT)
         history = [{"role": m["role"], "parts": [m["content"]]} for m in st.session_state.conversation]
         chat = model.start_chat(history=history)
         response = chat.send_message(user_message)
@@ -193,3 +193,4 @@ with col2:
         if user_input:
             send_message(user_input)
             st.rerun()
+            
