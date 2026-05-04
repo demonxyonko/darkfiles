@@ -1,11 +1,11 @@
 import streamlit as st
-import google.generativeai as genai
+from groq import Groq
 import re
 
-# ── PAGE CONFIG ──────────────────────────────────────────────────────────────
+# ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Dark Files | Detective Agency", page_icon="🕯", layout="centered")
 
-# ── STYLING ──────────────────────────────────────────────────────────────────
+# ── STYLING ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=EB+Garamond&display=swap');
@@ -30,8 +30,8 @@ SYSTEM_PROMPT = """You are an intelligent detective game master AI running an in
 
 GAME RULES:
 - Each session, generate a completely new and unique case.
-- Difficulty follows MIXED PROGRESSION (start easier, gradually increase complexity).
-- Case style adapts naturally (realistic crime, thriller, psychological, mystery, etc.)
+- Difficulty follows MIXED PROGRESSION (start easier, gradually increase).
+- Case style adapts naturally (crime, thriller, psychological, mystery, etc.)
 
 GAMEPLAY:
 1. Start with a compelling case introduction (victim, setting, situation).
@@ -43,7 +43,7 @@ INTERACTION:
 - Respond like a game master, NOT like an AI.
 - Only reveal info specifically asked for or logically discovered.
 - Reward good questions with meaningful clues.
-- Don't immediately correct wrong assumptions — let the player explore.
+- Don't immediately correct wrong assumptions.
 
 CASE ELEMENTS: Suspects with motives/alibis, red herrings, plot twists, evidence.
 
@@ -52,7 +52,13 @@ ENDING: When player gives final answer — evaluate correctness, explain full so
 STYLE: Immersive, suspenseful, cinematic. Use **bold** for key clues/names. Keep responses concise but impactful."""
 
 # ── SESSION STATE ─────────────────────────────────────────────────────────────
-for key, default in {"conversation": [], "messages_display": [], "game_started": False, "case_number": 1, "api_key": ""}.items():
+for key, default in {
+    "conversation": [],
+    "messages_display": [],
+    "game_started": False,
+    "case_number": 1,
+    "api_key": "",
+}.items():
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -62,58 +68,46 @@ def fmt(text):
     text = re.sub(r'\*(.+?)\*', r'<em style="color:#b8a080">\1</em>', text)
     return text.replace('\n', '<br>')
 
-MODELS_TO_TRY = [
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-2.0-flash-lite",
-    "gemini-pro",
-    "gemini-1.0-pro",
-]
-
-def call_gemini(user_message):
-    genai.configure(api_key=st.session_state.api_key)
-    # Use cached model or start from beginning of list
-    start_index = st.session_state.get("model_index", 0)
-    for i in range(start_index, len(MODELS_TO_TRY)):
-        model_name = MODELS_TO_TRY[i]
-        try:
-            model = genai.GenerativeModel(model_name=model_name, system_instruction=SYSTEM_PROMPT)
-            history = [{"role": m["role"], "parts": [m["content"]]} for m in st.session_state.conversation]
-            chat = model.start_chat(history=history)
-            response = chat.send_message(user_message)
-            reply = response.text
-            st.session_state.model_index = i  # Cache working model
-            st.session_state.conversation.append({"role": "user", "content": user_message})
-            st.session_state.conversation.append({"role": "model", "content": reply})
-            return reply
-        except Exception as e:
-            err = str(e)
-            if "API_KEY_INVALID" in err or "invalid" in err.lower():
-                return "❌ Invalid API key. Please re-enter your Gemini API key."
-            if "quota" in err.lower() or "429" in err:
-                return "⏳ Rate limit hit. Please wait 1 minute and try again."
-            # Model not found — try next one
-            continue
-    return "❌ No working Gemini model found for your API key. Please try creating a new API key at aistudio.google.com"
+def call_groq(user_message):
+    try:
+        client = Groq(api_key=st.session_state.api_key)
+        st.session_state.conversation.append({"role": "user", "content": user_message})
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + st.session_state.conversation
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            max_tokens=1000,
+            temperature=0.9,
+        )
+        reply = response.choices[0].message.content
+        st.session_state.conversation.append({"role": "assistant", "content": reply})
+        return reply
+    except Exception as e:
+        err = str(e)
+        if "invalid_api_key" in err.lower() or "401" in err:
+            return "❌ Invalid API key. Please re-enter your Groq API key."
+        if "rate_limit" in err.lower() or "429" in err:
+            return "⏳ Rate limit hit. Please wait a few seconds and try again."
+        return f"*Connection lost… try again.*\n\nError: {err}"
 
 def start_case():
     st.session_state.conversation = []
     st.session_state.messages_display = []
     st.session_state.game_started = True
-    reply = call_gemini("Start a new detective case. Give me a compelling case introduction.")
+    reply = call_groq("Start a new detective case. Give me a compelling case introduction.")
     st.session_state.messages_display.append({"role": "assistant", "content": reply})
 
 def new_case():
     st.session_state.case_number += 1
     st.session_state.conversation = []
     st.session_state.messages_display = []
-    reply = call_gemini("Start a completely new detective case. Give me the case introduction.")
+    reply = call_groq("Start a completely new and different detective case. Give me the case introduction.")
     st.session_state.messages_display.append({"role": "assistant", "content": reply})
 
 def send_message(text):
     if not text.strip(): return
     st.session_state.messages_display.append({"role": "user", "content": text})
-    reply = call_gemini(text)
+    reply = call_groq(text)
     st.session_state.messages_display.append({"role": "assistant", "content": reply})
 
 # ── HEADER ────────────────────────────────────────────────────────────────────
@@ -124,10 +118,10 @@ st.markdown('<hr>', unsafe_allow_html=True)
 # ── API KEY SCREEN ────────────────────────────────────────────────────────────
 if not st.session_state.api_key:
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<p style="color:#8a7050;text-align:center;font-size:15px;">Enter your <strong style="color:#c9a84c;">FREE</strong> Gemini API key to begin</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color:#8a7050;text-align:center;font-size:15px;">Enter your <strong style="color:#c9a84c;">FREE</strong> Groq API key to begin</p>', unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 3, 1])
     with col2:
-        key_input = st.text_input("", placeholder="AIzaSy...", type="password", label_visibility="collapsed")
+        key_input = st.text_input("", placeholder="gsk_...", type="password", label_visibility="collapsed")
         if st.button("🔑  Unlock the Files", use_container_width=True):
             if key_input.strip():
                 st.session_state.api_key = key_input.strip()
@@ -136,14 +130,15 @@ if not st.session_state.api_key:
                 st.error("Please enter your API key.")
     st.markdown("""
     <div style="text-align:center;margin-top:28px;padding:20px;background:rgba(200,160,60,0.05);border:1px solid #2a2010;border-radius:8px;">
-        <p style="color:#c9a84c;font-size:14px;font-weight:bold;margin-bottom:12px;">🆓 How to get your FREE Gemini API Key</p>
-        <p style="color:#7a6040;font-size:13px;line-height:2.2;margin:0;">
-            1. Go to <strong style="color:#e8c96d;">aistudio.google.com</strong><br>
-            2. Sign in with your Google account<br>
-            3. Click <strong style="color:#e8c96d;">"Get API Key"</strong> on the left<br>
+        <p style="color:#c9a84c;font-size:14px;font-weight:bold;margin-bottom:12px;">🆓 How to get your FREE Groq API Key</p>
+        <p style="color:#7a6040;font-size:13px;line-height:2.5;margin:0;">
+            1. Go to <strong style="color:#e8c96d;">console.groq.com</strong><br>
+            2. Click <strong style="color:#e8c96d;">Sign Up</strong> — use Google or email<br>
+            3. Click <strong style="color:#e8c96d;">"API Keys"</strong> on the left sidebar<br>
             4. Click <strong style="color:#e8c96d;">"Create API Key"</strong><br>
-            5. Copy the key and paste it above
+            5. Copy the key (starts with <strong style="color:#e8c96d;">gsk_</strong>) and paste above
         </p>
+        <p style="color:#5a4020;font-size:12px;margin-top:12px;">✅ No credit card required &nbsp;|&nbsp; ✅ Works in all countries &nbsp;|&nbsp; ✅ Very generous free limits</p>
     </div>
     """, unsafe_allow_html=True)
     st.stop()
@@ -210,4 +205,3 @@ with col2:
         if user_input:
             send_message(user_input)
             st.rerun()
-            
