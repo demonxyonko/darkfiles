@@ -62,22 +62,39 @@ def fmt(text):
     text = re.sub(r'\*(.+?)\*', r'<em style="color:#b8a080">\1</em>', text)
     return text.replace('\n', '<br>')
 
+MODELS_TO_TRY = [
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-2.0-flash-lite",
+    "gemini-pro",
+    "gemini-1.0-pro",
+]
+
 def call_gemini(user_message):
-    try:
-        genai.configure(api_key=st.session_state.api_key)
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash-latest", system_instruction=SYSTEM_PROMPT)
-        history = [{"role": m["role"], "parts": [m["content"]]} for m in st.session_state.conversation]
-        chat = model.start_chat(history=history)
-        response = chat.send_message(user_message)
-        reply = response.text
-        st.session_state.conversation.append({"role": "user", "content": user_message})
-        st.session_state.conversation.append({"role": "model", "content": reply})
-        return reply
-    except Exception as e:
-        err = str(e)
-        if "API_KEY_INVALID" in err or "invalid" in err.lower():
-            return "❌ Invalid API key. Please check and re-enter your Gemini API key."
-        return f"*Connection lost… try again.*\n\nError: {err}"
+    genai.configure(api_key=st.session_state.api_key)
+    # Use cached model or start from beginning of list
+    start_index = st.session_state.get("model_index", 0)
+    for i in range(start_index, len(MODELS_TO_TRY)):
+        model_name = MODELS_TO_TRY[i]
+        try:
+            model = genai.GenerativeModel(model_name=model_name, system_instruction=SYSTEM_PROMPT)
+            history = [{"role": m["role"], "parts": [m["content"]]} for m in st.session_state.conversation]
+            chat = model.start_chat(history=history)
+            response = chat.send_message(user_message)
+            reply = response.text
+            st.session_state.model_index = i  # Cache working model
+            st.session_state.conversation.append({"role": "user", "content": user_message})
+            st.session_state.conversation.append({"role": "model", "content": reply})
+            return reply
+        except Exception as e:
+            err = str(e)
+            if "API_KEY_INVALID" in err or "invalid" in err.lower():
+                return "❌ Invalid API key. Please re-enter your Gemini API key."
+            if "quota" in err.lower() or "429" in err:
+                return "⏳ Rate limit hit. Please wait 1 minute and try again."
+            # Model not found — try next one
+            continue
+    return "❌ No working Gemini model found for your API key. Please try creating a new API key at aistudio.google.com"
 
 def start_case():
     st.session_state.conversation = []
