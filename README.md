@@ -39,7 +39,7 @@ No two cases are ever the same. No answers are handed to you. Every deduction is
 
 ---
 
-## 🖤 Screenshots
+## 🖤 Prototype 
 
 ```
 ╔══════════════════════════════════════════════════════════╗
